@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { gzipSync } from 'node:zlib';
+import { makeTar } from './helpers.js';
 
 const now = Date.now();
 const iso = daysAgo => new Date(now - daysAgo * 86400000).toISOString();
@@ -35,6 +37,9 @@ function fakeFetch(url, opts = {}) {
     return r.link ? json(r.body, 200, { link: r.link }) : json(r);
   }
   if (u.hostname === 'raw.githubusercontent.com') return json('django==3.2.0\nrequests==2.31.0\n');
+  if (u.hostname === 'codeload.github.com') return Promise.resolve(new Response(gzipSync(makeTar({
+    'app/main.py': 'from app import db\nfrom app.api import routes', 'app/db.py': '', 'app/api/routes.py': 'from ..db import engine',
+  }))));
   if (u.pathname === '/v1/querybatch') {
     const { queries } = JSON.parse(opts.body);
     return json({ results: queries.map(q => (q.package.name === 'django' ? { vulns: [{ id: 'GHSA-aaaa' }, { id: 'PYSEC-1' }] } : {})) });
@@ -118,4 +123,15 @@ test('Repo Pilot fills Architecture and adds code structure to the score', async
   assert.match(doc.getElementById('main').textContent, /64\/100 \(grade C\)/);
   assert.match(doc.getElementById('main').textContent, /Circular import/);
   assert.notEqual(doc.querySelector('.score-line').textContent, before, 'overall score now includes code structure');
+});
+
+test('Architecture tab draws the import graph without any backend', async () => {
+  const { doc } = await boot();
+  await until(() => doc.querySelector('.grade'));
+  tabBtn(doc, 'Architecture').click();
+  await until(() => doc.getElementById('drawn'));
+  const text = doc.getElementById('main').textContent;
+  assert.match(text, /3 imports between 3 files, parsed from 3 source files/);
+  assert.match(text, /Most imported filesapp\/db\.py2 importers/);
+  assert.ok(!/Run Repo Pilot/.test(text), 'no Repo Pilot prompt when no backend is set');
 });
