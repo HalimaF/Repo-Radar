@@ -88,4 +88,5 @@ test('Mermaid: file level groups by folder; big graphs collapse to folders', () 
 test('labels cannot break out of Mermaid syntax', () => {
   const m = toMermaid({ nodes: [], edges: [['we"ird<b>.js', 'ok.js']] }).mermaid;
   assert.ok(!m.includes('<b>') && !/"we"/.test(m));
+  assert.ok(!toMermaid({ nodes: [], edges: [['$$x^2$$.js', 'ok.js']] }).mermaid.includes('$$'));
 });

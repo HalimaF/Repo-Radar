@@ -103,7 +103,8 @@ export function hubs(graph, n = 5) {
   return Object.entries(inDeg).sort((a, b) => b[1] - a[1]).slice(0, n).map(([path, count]) => ({ path, count }));
 }
 
-const esc = s => s.replace(/"/g, '#quot;').replace(/[<>]/g, '');
+// "$$" would hand a scanned repo's file name to the KaTeX bundled inside Mermaid.
+const esc = s => s.replace(/"/g, '#quot;').replace(/[<>]/g, '').replace(/\${2,}/g, '$');
 
 /**
  * Mermaid flowchart. Small graphs are drawn per file, grouped in folder boxes; large ones
