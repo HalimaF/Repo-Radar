@@ -5,6 +5,8 @@ import { scanDependencies } from '../lib/deps.js';
 import { activity, activityScore, hygiene, dependencyScore, overall, grade, verdict } from '../lib/score.js';
 import { makeRepoPilot } from '../lib/repoPilot.js';
 import { loadSettings } from '../lib/settings.js';
+import { fetchSources } from '../lib/tarball.js';
+import { buildGraph, toMermaid, hubs, isSource } from '../lib/graph.js';
 
 const CACHE_TTL = 30 * 60 * 1000;
 const main = document.getElementById('main');
@@ -15,6 +17,8 @@ let view = null;      // computed data for current repo
 let tab = 'overview';
 let runId = 0;        // guards against a slow earlier scan overwriting a newer one
 const pilot = new Map(); // "owner/repo" -> { status, diagram, health, error }
+const arch = new Map();  // "owner/repo" -> built-in diagram { status, graph, mermaid, level, hubs, error }
+const MAX_REPO_KB = 150000;
 
 // DOM helper: children are text or nodes; text is always set as text, never as HTML.
 function h(tag, attrs = {}, ...kids) {
@@ -228,22 +232,67 @@ function depsTab() {
 
 // ---------- Repo Pilot ----------
 
+// The built-in diagram: download the source once, parse imports locally, no backend needed.
+async function buildArch() {
+  const target = current, k = key(target), { meta } = view.raw;
+  arch.set(k, { status: 'running' });
+  try {
+    if (meta.size > MAX_REPO_KB) throw new Error(`This repo is over ${MAX_REPO_KB / 1000} MB, too big to parse in the browser. Repo Pilot can still draw it.`);
+    const files = await fetchSources(target.owner, target.repo, meta.default_branch, isSource);
+    const graph = buildGraph(files);
+    arch.set(k, { status: 'done', graph, ...toMermaid(graph), hubs: hubs(graph) });
+  } catch (e) {
+    arch.set(k, { status: 'error', error: e.message });
+  }
+  if (current && key(current) === k && tab === 'arch') render();
+}
+
 function archTab() {
-  const p = pilot.get(key(current));
-  if (!p?.diagram) return pilotPrompt('Draw the real import graph of this repo with Repo Pilot. The structure is parsed from the code, not generated.');
-  if (!p.diagram.mermaid) return h('p', { class: 'error' }, 'Repo Pilot answered, but the response had no diagram. Check the diagram endpoint in Settings.');
+  const k = key(current);
+  const p = pilot.get(k);
+  if (p?.diagram?.mermaid) return [diagramView(p.diagram.mermaid), h('p', { class: 'note' }, p.diagram.aggregated ? 'Drawn by Repo Pilot at folder level.' : 'Drawn by Repo Pilot.')];
+
+  const a = arch.get(k);
+  if (!a) buildArch();
+  if (!a || a.status === 'running') return h('p', { class: 'empty' }, h('span', { class: 'spin' }), ' Downloading the source and parsing imports…');
+  if (a.status === 'error') return [h('p', { class: 'error' }, a.error), h('div', { class: 'actions' }, h('button', { onclick: () => { arch.delete(k); render(); } }, 'Try again')), pilotOptional()];
+
+  const files = a.graph.nodes.length;
+  if (!a.mermaid) {
+    return [h('p', { class: 'empty' }, files
+      ? `Parsed ${files} source files but found no imports between them.`
+      : 'No JavaScript, TypeScript, Python or Dart source found.'), pilotOptional()];
+  }
+  return [
+    h('p', { class: 'sub' }, `${a.graph.edges.length} imports between ${a.shown} ${a.level === 'folder' ? 'folders' : 'files'}, parsed from ${files} source files.`
+      + (a.level === 'folder' ? ' Large repo, so files are grouped by folder; edge labels count the imports.' : '')),
+    diagramView(a.mermaid),
+    a.hubs.length && h('h2', {}, 'Most imported files'),
+    a.hubs.length && h('ul', { class: 'plain' }, a.hubs.map(x => h('li', {}, h('div', { class: 'grow' }, fileLink(x.path)), h('span', { class: 'sub' }, `${x.count} importers`)))),
+    h('p', { class: 'note' }, 'Every arrow is an import statement found in the code. Imports resolved through custom path aliases or build config may be missing.'),
+    pilotOptional(),
+  ];
+}
+
+function diagramView(code) {
   let scale = 1;
   const box = h('div', { class: 'diagram' }, h('span', { class: 'spin' }));
   const zoom = f => { scale = Math.min(3, Math.max(0.2, scale * f)); box.style.transform = `scale(${scale})`; };
-  renderMermaid(box, p.diagram.mermaid);
+  renderMermaid(box, code);
   return [
     h('div', { class: 'actions' },
       h('button', { onclick: () => zoom(1.25), 'aria-label': 'Zoom in' }, '+'),
       h('button', { onclick: () => zoom(0.8), 'aria-label': 'Zoom out' }, '−'),
-      h('button', { onclick: () => { scale = 1; zoom(1); } }, 'Reset'),
-      p.diagram.aggregated && h('span', { class: 'sub' }, 'Large repo: shown at folder level.')),
+      h('button', { onclick: () => { scale = 1; zoom(1); } }, 'Reset')),
     h('div', { class: 'diagram-wrap' }, box),
   ];
+}
+
+// Shown only when a Repo Pilot backend is configured; otherwise nothing.
+function pilotOptional() {
+  const wrap = h('div', {});
+  loadSettings().then(({ repoPilotUrl }) => { if (repoPilotUrl) wrap.replaceChildren(pilotPrompt('Repo Pilot can also draw this, with nested folders and support for more languages.')); });
+  return wrap;
 }
 
 let mermaidReady = false;

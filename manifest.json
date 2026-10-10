@@ -12,6 +12,7 @@
   "host_permissions": [
     "https://api.github.com/*",
     "https://raw.githubusercontent.com/*",
+    "https://codeload.github.com/*",
     "https://api.osv.dev/*"
   ],
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
