@@ -1,0 +1,17 @@
+{
+  "name": "repo-radar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chrome extension: a whole view of any GitHub repo.",
+  "scripts": {
+    "test": "node --test",
+    "vendor": "node scripts/vendor.js",
+    "zip": "node scripts/vendor.js && rm -f repo-radar.zip && zip -qr repo-radar.zip manifest.json src vendor icons"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1",
+    "mermaid": "^11.4.0"
+  },
+  "license": "MIT"
+}

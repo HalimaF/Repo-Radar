@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Repo Radar settings</title>
+  <link rel="stylesheet" href="../panel/panel.css">
+  <style>
+    body { max-width: 560px; margin: 32px auto; padding: 0 16px; }
+    label { display: block; font-weight: 600; margin: 20px 0 6px; }
+    input, textarea { width: 100%; box-sizing: border-box; }
+    textarea { min-height: 120px; font-family: var(--mono); font-size: 12px; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Repo Radar settings</h1>
+
+  <label for="token">GitHub token (optional)</label>
+  <input id="token" type="password" autocomplete="off" placeholder="github_pat_…">
+  <p class="hint">Raises GitHub's limit from 60 to 5,000 requests an hour (about 5 vs 450 repo scans). Use a fine-grained token with <b>public repositories, read-only</b> access. Stored only on this computer.</p>
+
+  <label for="rp">Repo Pilot backend URL (optional)</label>
+  <input id="rp" type="url" placeholder="https://your-space.hf.space or http://localhost:8000">
+  <p class="hint">Turns on the Architecture and Code health tabs. Repo Radar only reads from it.</p>
+
+  <label for="ep">Repo Pilot endpoint paths (advanced)</label>
+  <textarea id="ep" spellcheck="false"></textarea>
+  <p class="hint">Change these if your Repo Pilot routes differ. Leave as-is otherwise.</p>
+
+  <p><button id="save" class="primary">Save</button> <span id="status" class="hint"></span></p>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
