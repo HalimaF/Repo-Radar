@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Repo Radar",
+  "version": "0.1.0",
+  "description": "A whole view of any GitHub repo: activity, health, dependencies, and its architecture.",
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": { "default_title": "Open Repo Radar" },
+  "side_panel": { "default_path": "src/panel/panel.html" },
+  "options_page": "src/options/options.html",
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "permissions": ["sidePanel", "storage", "tabs"],
+  "host_permissions": [
+    "https://api.github.com/*",
+    "https://raw.githubusercontent.com/*",
+    "https://api.osv.dev/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
+}

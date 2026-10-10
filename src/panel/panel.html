@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Repo Radar</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <form class="picker" id="picker">
+    <input id="repo-input" type="text" placeholder="github.com/owner/repo" aria-label="GitHub repository" autocomplete="off">
+    <button type="submit" class="primary">Analyze</button>
+    <button type="button" id="settings" title="Settings" aria-label="Settings">⚙</button>
+  </form>
+  <main id="main" aria-live="polite">
+    <p class="empty">Open a GitHub repository, or paste its link above.</p>
+  </main>
+  <script src="../../vendor/mermaid.min.js"></script>
+  <script type="module" src="panel.js"></script>
+</body>
+</html>
