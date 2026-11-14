@@ -17,6 +17,7 @@ export function makeGitHub(token, fetchImpl = fetch) {
         throw new GitHubError('GitHub rate limit reached. Add a token in Repo Radar settings.', res.status);
       }
     }
+    if (res.status === 401) throw new GitHubError('GitHub rejected the token. Check or remove it in Repo Radar settings.', 401);
     if (!res.ok && res.status !== 202) throw new GitHubError(`GitHub ${res.status} on ${path}`, res.status);
     return { data: res.status === 202 || res.status === 204 ? null : await res.json(), res };
   }

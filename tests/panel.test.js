@@ -20,6 +20,7 @@ const routes = {
   ],
   '/repos/acme/widget/pulls?state=open&per_page=1': { body: [{}], link: '<https://api.github.com/x?state=open&per_page=1&page=4>; rel="last"' },
   '/repos/acme/widget/pulls?state=closed&sort=updated&direction=desc&per_page=100': [{ merged_at: iso(5) }, { merged_at: null }, { merged_at: iso(200) }],
+  '/repos/acme/widget/issues?state=closed&sort=updated&direction=desc&per_page=100': [{ created_at: iso(9), closed_at: iso(7) }, { created_at: iso(9), closed_at: iso(1), pull_request: {} }],
   '/repos/acme/widget/releases?per_page=5': [{ tag_name: 'v2.1.0', published_at: iso(20) }],
   '/repos/acme/widget/community/profile': { files: { readme: {}, contributing: null } },
   '/repos/acme/widget/git/trees/main?recursive=1': { tree: ['README.md', 'requirements.txt', 'app/main.py', 'tests/test_main.py', '.github/workflows/ci.yml'].map(path => ({ path, type: 'blob' })) },
@@ -46,6 +47,11 @@ function fakeFetch(url, opts = {}) {
   }
   if (u.pathname === '/v1/vulns/GHSA-aaaa') return json({ id: 'GHSA-aaaa', summary: 'SQL injection <script>', aliases: ['CVE-1'], database_specific: { severity: 'HIGH' } });
   if (u.pathname === '/v1/vulns/PYSEC-1') return json({ id: 'PYSEC-1', aliases: ['CVE-1'] }); // same flaw, should be de-duplicated
+  if (u.hostname === 'api.deps.dev') {
+    if (u.pathname === '/v3/systems/pypi/packages/django') return json({ versions: [{ versionKey: { version: '3.2.0' } }, { versionKey: { version: '5.1.0' }, isDefault: true }] });
+    if (u.pathname === '/v3/systems/pypi/packages/requests/versions/2.31.0') return json({ licenses: ['GPL-3.0'] });
+    return json({}, 404);
+  }
   // Repo Pilot backend
   if (u.pathname === '/api/ingest') return json({ ok: true });
   if (u.pathname === '/api/diagram') return json({ mermaid: 'flowchart LR\n a-->b' });
@@ -62,17 +68,21 @@ async function boot() {
     matchMedia: () => ({ matches: false }),
     fetch: fakeFetch,
     chrome: {
-      storage: { local: {
+      storage: (area => ({ local: area, session: area }))({
         get: async keys => Object.fromEntries([].concat(keys).filter(k => k in store).map(k => [k, store[k]])),
         set: async o => Object.assign(store, JSON.parse(JSON.stringify(o))),
-      } },
+      }),
       tabs: { query: async () => [{ url: 'https://github.com/acme/widget/pulls' }], onActivated: { addListener() {} }, onUpdated: { addListener() {} } },
       runtime: { openOptionsPage() {} },
     },
   });
-  dom.window.mermaid = { initialize() {}, render: async () => ({ svg: '<svg id="drawn"></svg>' }) };
+  const copied = [], opened = [];
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async t => { copied.push(t); } } } });
+  dom.window.open = url => { opened.push(url); };
+  // Shaped like Mermaid's output: one <g class="node"> per box, with our node id inside its element id.
+  dom.window.mermaid = { initialize() {}, render: async (_, code) => ({ svg: `<svg id="drawn">${[...code.matchAll(/^\s+(n\d+)\[/gm)].map(m => `<g class="node" id="rr-1-flowchart-${m[1]}-0"></g>`).join('')}</svg>` }) };
   await import(`../src/panel/panel.js?${Math.random()}`);
-  return { doc: dom.window.document, store };
+  return { doc: dom.window.document, store, copied, opened, window: dom.window };
 }
 
 const until = async (fn, ms = 3000) => {
@@ -99,6 +109,7 @@ test('side panel scans the active tab repo and renders every tab', async () => {
   assert.match(main.textContent, /Open issues8/);         // 12 minus 4 PRs
   assert.match(main.textContent, /Issues idle 90\+ days3/);
   assert.match(main.textContent, /1 person makes half/);
+  assert.match(main.textContent, /Typical time to close an issue2 days/, 'pull requests in the issues list are left out');
 
   tabBtn(doc, 'Health').click();
   assert.match(main.textContent, /1\/2 checks passing/);
@@ -107,6 +118,79 @@ test('side panel scans the active tab repo and renders every tab', async () => {
   assert.match(main.textContent, /1 known vulnerability/);
   assert.equal(doc.querySelectorAll('.sev.high').length, 1);
   assert.ok(!doc.querySelector('script'), 'vulnerability summary is not injected as HTML');
+});
+
+const button = (doc, name) => [...doc.querySelectorAll('button')].find(b => b.textContent === name);
+
+test('overview explains the score, copies a report and a badge, and keeps a watchlist', async () => {
+  const { doc, store, copied } = await boot();
+  const main = doc.getElementById('main');
+  await until(() => doc.querySelector('.grade'));
+  assert.match(main.textContent, /Where points were lost/);
+  assert.match(main.textContent, /1 high vulnerabilityDependencies−15/);
+  assert.match(main.textContent, /CI passing on default branch: missing or failing/);
+
+  button(doc, 'Copy report').click();
+  await until(() => copied.length === 1);
+  assert.match(copied[0], /^## Repo Radar: \[acme\/widget\]\(https:\/\/github\.com\/acme\/widget\)/);
+  assert.match(copied[0], /\| Known vulnerabilities \| 1 \|/);
+  button(doc, 'Copy badge').click();
+  await until(() => copied.length === 2);
+  assert.match(copied[1], /^!\[Repo Radar grade [A-F]\]\(https:\/\/img\.shields\.io\/badge\/Repo%20Radar-[A-F]-\w+\)$/);
+
+  button(doc, 'Watch').click();
+  await until(() => button(doc, 'Stop watching'));
+  assert.equal(store.watch['acme/widget'].vulns, 1);
+  assert.match(main.textContent, /Watchingacme\/widgetgrade [A-F]/);
+  button(doc, 'Stop watching').click();
+  await until(() => button(doc, 'Watch'));
+  assert.deepEqual(store.watch, {});
+});
+
+test('dependencies tab flags outdated and GPL packages; compare shows two repos side by side', async () => {
+  const { doc } = await boot();
+  const main = doc.getElementById('main');
+  await until(() => doc.querySelector('.grade'));
+
+  tabBtn(doc, 'Dependencies').click();
+  assert.match(main.textContent, /1 far behind the latest version/);
+  assert.match(main.textContent, /django 3\.2\.0latest 5\.1\.0/);
+  assert.match(main.textContent, /1 under a GPL-family licence/);
+  assert.match(main.textContent, /requestsGPL-3\.0/);
+
+  tabBtn(doc, 'Compare').click();
+  const form = doc.querySelector('form.row');
+  form.elements.other.value = 'nobody/nothing';
+  form.dispatchEvent(new doc.defaultView.Event('submit', { cancelable: true }));
+  await until(() => /Repository not found/.test(main.textContent));
+
+  const again = doc.querySelector('form.row');
+  again.elements.other.value = 'Acme/Widget';
+  again.dispatchEvent(new doc.defaultView.Event('submit', { cancelable: true }));
+  await until(() => doc.querySelector('table.cmp'));
+  const rows = [...doc.querySelectorAll('table.cmp tbody tr')].map(r => r.textContent);
+  assert.ok(rows.includes('Stars15k15k') && rows.includes('Known vulnerabilities11'));
+  assert.equal(doc.querySelectorAll('td.win').length, 0, 'equal values have no winner');
+});
+
+test('diagram boxes open their file and the search fades unrelated boxes', async () => {
+  const { doc, opened, window } = await boot();
+  await until(() => doc.querySelector('.grade'));
+  tabBtn(doc, 'Architecture').click();
+  await until(() => doc.querySelectorAll('g.node').length === 3);
+  await until(() => doc.querySelector('g.node').style.cursor === 'pointer');
+
+  doc.querySelector('g.node').dispatchEvent(new window.Event('click'));
+  assert.match(opened[0], /^https:\/\/github\.com\/acme\/widget\/blob\/main\/app\/\w+/);
+
+  const find = doc.querySelector('input.find');
+  find.value = 'routes';
+  find.dispatchEvent(new window.Event('input'));
+  assert.equal(doc.querySelectorAll('g.node.hit').length, 1);
+  assert.equal(doc.querySelectorAll('g.node.dim').length, 0, 'routes.py touches both other files');
+  find.value = 'zzz';
+  find.dispatchEvent(new window.Event('input'));
+  assert.equal(doc.querySelectorAll('g.node.dim').length, 3);
 });
 
 test('Repo Pilot fills Architecture and adds code structure to the score', async () => {

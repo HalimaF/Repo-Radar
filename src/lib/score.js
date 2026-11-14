@@ -18,6 +18,12 @@ export function busFactor(contributors, now = Date.now()) {
   return { value, top: recent.slice(0, 5), total, activeAuthors: recent.length };
 }
 
+/** Median days between created_at and the given end date, over the items that have both. */
+function medianDays(items, endKey) {
+  const xs = (items ?? []).filter(x => x.created_at && x[endKey]).map(x => (Date.parse(x[endKey]) - Date.parse(x.created_at)) / DAY).sort((a, b) => a - b);
+  return xs.length ? xs[xs.length >> 1] : null;
+}
+
 export function activity(raw, now = Date.now()) {
   const weeks = raw.commitActivity ?? [];
   const commits90 = weeks.slice(-13).reduce((s, w) => s + w.total, 0);
@@ -34,19 +40,28 @@ export function activity(raw, now = Date.now()) {
     daysSincePush: Math.floor(daysSince(raw.meta.pushed_at, now)),
     lastRelease: lastRelease && { tag: lastRelease.tag_name, days: Math.floor(daysSince(lastRelease.published_at, now)) },
     bus: busFactor(raw.contributors, now),
+    mergeDays: medianDays(raw.closedPRs, 'merged_at'),
+    closeDays: medianDays(raw.closedIssues, 'closed_at'),
     archived: !!raw.meta.archived,
   };
 }
 
-export function activityScore(a) {
-  if (a.archived) return 0;
+/** The equally weighted parts of the activity score, each with the sentence that explains it. */
+export function activityParts(a) {
+  if (a.archived) return [{ score: 0, why: 'The repo is archived' }];
   const d = a.daysSincePush;
-  const recency = d <= 7 ? 100 : d <= 30 ? 80 : d <= 90 ? 55 : d <= 180 ? 30 : d <= 365 ? 10 : 0;
-  const commits = Math.min(100, 25 * Math.log2(1 + a.commits90)); // 15 commits/quarter = 100
-  const parts = [recency, commits];
-  if (a.bus) parts.push({ 0: 0, 1: 30, 2: 60, 3: 80, 4: 80 }[a.bus.value] ?? 100);
-  if (a.openIssues && a.staleIssues != null) parts.push(100 * (1 - Math.min(1, a.staleIssues / a.openIssues)));
-  return clamp(parts.reduce((s, x) => s + x, 0) / parts.length);
+  const parts = [
+    { score: d <= 7 ? 100 : d <= 30 ? 80 : d <= 90 ? 55 : d <= 180 ? 30 : d <= 365 ? 10 : 0, why: isFinite(d) ? `Last push was ${d} days ago` : 'Nothing has been pushed' },
+    { score: Math.min(100, 25 * Math.log2(1 + a.commits90)), why: `Only ${a.commits90} commits in the last 90 days` }, // 15 commits/quarter = 100
+  ];
+  if (a.bus) parts.push({ score: { 0: 0, 1: 30, 2: 60, 3: 80, 4: 80 }[a.bus.value] ?? 100, why: a.bus.value ? `Bus factor is ${a.bus.value}: few people make most of the commits` : 'No commits in the last year' });
+  if (a.openIssues && a.staleIssues != null) parts.push({ score: 100 * (1 - Math.min(1, a.staleIssues / a.openIssues)), why: `${a.staleIssues} of ${a.openIssues} open issues idle for 90+ days` });
+  return parts;
+}
+
+export function activityScore(a) {
+  const parts = activityParts(a);
+  return clamp(parts.reduce((s, p) => s + p.score, 0) / parts.length);
 }
 
 const has = (paths, re) => paths.some(p => re.test(p));
@@ -90,6 +105,27 @@ export function overall({ activity: a, hygiene: h, deps, code }) {
 
 export function grade(score) {
   return score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 55 ? 'C' : score >= 40 ? 'D' : 'F';
+}
+
+/** Everything the panel shows for one repo, computed from a scan. */
+export function summarize(raw, deps) {
+  const act = activity(raw), hyg = hygiene(raw);
+  return { raw, deps, act, hyg, scores: { activity: activityScore(act), hygiene: hyg.score, deps: dependencyScore(deps) }, verdict: verdict(act, hyg, deps) };
+}
+
+/** Why each part is below 100: { activity, hygiene, deps } lists of { lost, why }, in that part's own points. */
+export function explain({ act, hyg, deps }) {
+  const parts = activityParts(act);
+  const scored = hyg.checks.filter(c => c.ok !== null);
+  const total = scored.reduce((s, c) => s + c.weight, 0);
+  const bySeverity = new Map();
+  for (const v of deps?.vulns ?? []) bySeverity.set(v.severity, (bySeverity.get(v.severity) ?? 0) + 1);
+  const some = list => list.filter(x => x.lost > 0);
+  return {
+    activity: some(parts.map(p => ({ lost: Math.round((100 - p.score) / parts.length), why: p.why }))),
+    hygiene: some(scored.filter(c => !c.ok).map(c => ({ lost: Math.round(100 * c.weight / total), why: `${c.label}: missing or failing` }))),
+    deps: [...bySeverity].map(([sev, n]) => ({ lost: n * (SEVERITY_COST[sev] ?? 5), why: `${n} ${sev.toLowerCase()} vulnerabilit${n === 1 ? 'y' : 'ies'}` })),
+  };
 }
 
 /** One plain sentence built only from computed facts. */

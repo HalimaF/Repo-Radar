@@ -1,12 +1,21 @@
 // Downloads a repo snapshot as one .tar.gz and returns { path: text } for the wanted files.
 // One request regardless of repo size, and codeload is not counted against the API rate limit.
 const MAX_FILE_BYTES = 512 * 1024;
+const MAX_TAR_BYTES = 400 * 1024 * 1024;
 
-export async function fetchSources(owner, repo, ref, wanted, fetchImpl = fetch) {
+export async function fetchSources(owner, repo, ref, wanted, fetchImpl = fetch, maxBytes = MAX_TAR_BYTES) {
   const res = await fetchImpl(`https://codeload.github.com/${owner}/${repo}/tar.gz/${encodeURIComponent(ref)}`);
   if (!res.ok) throw new Error(`Could not download the repo (HTTP ${res.status}).`);
-  const tar = new Uint8Array(await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
-  return untar(tar, wanted);
+  // Read in pieces so a small download that inflates to gigabytes is stopped, not held in memory.
+  const reader = res.body.pipeThrough(new DecompressionStream('gzip')).getReader();
+  const chunks = [];
+  for (let total = 0; ;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if ((total += value.length) > maxBytes) { reader.cancel(); throw new Error('This repo is too big to parse in the browser once unpacked.'); }
+    chunks.push(value);
+  }
+  return untar(new Uint8Array(await new Blob(chunks).arrayBuffer()), wanted);
 }
 
 /** Minimal ustar/pax reader: regular files only, top-level "owner-repo-sha/" folder stripped. */

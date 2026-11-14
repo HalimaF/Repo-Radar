@@ -18,6 +18,6 @@ export function parseRepo(input) {
   const [owner, rawRepo] = url.pathname.split('/').filter(Boolean);
   if (!owner || !rawRepo || RESERVED.has(owner.toLowerCase())) return null;
   const repo = rawRepo.replace(/\.git$/, '');
-  if (!NAME.test(owner) || !NAME.test(repo)) return null;
+  if (!NAME.test(owner) || !NAME.test(repo) || /^\.+$/.test(owner) || /^\.+$/.test(repo)) return null;
   return { owner, repo };
 }

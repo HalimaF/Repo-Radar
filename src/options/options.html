@@ -17,11 +17,12 @@
 
   <label for="token">GitHub token (optional)</label>
   <input id="token" type="password" autocomplete="off" placeholder="github_pat_…">
-  <p class="hint">Raises GitHub's limit from 60 to 5,000 requests an hour (about 5 vs 450 repo scans). Use a fine-grained token with <b>public repositories, read-only</b> access. Stored only on this computer.</p>
+  <p class="hint">Raises GitHub's limit from 60 to 5,000 requests an hour (about 5 vs 400 repo scans). Use a fine-grained token with <b>public repositories, read-only</b> access. Stored only on this computer.</p>
+  <p><button id="signin" type="button" hidden>Sign in with GitHub instead</button> <span id="device" class="hint" aria-live="polite"></span></p>
 
   <label for="rp">Repo Pilot backend URL (optional)</label>
   <input id="rp" type="url" placeholder="https://your-space.hf.space or http://localhost:8000">
-  <p class="hint">Turns on the Architecture and Code health tabs. Repo Radar only reads from it.</p>
+  <p class="hint">Adds the code-structure score and an alternative diagram. The Architecture tab works without it. The repo link you scan is sent to this server.</p>
 
   <label for="ep">Repo Pilot endpoint paths (advanced)</label>
   <textarea id="ep" spellcheck="false"></textarea>

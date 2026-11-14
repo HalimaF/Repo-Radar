@@ -114,6 +114,18 @@ ul.plain li:last-child { border-bottom: 0; }
 .diagram { transform-origin: 0 0; padding: 10px; }
 .diagram svg { max-width: none; height: auto; }
 
+.diagram .node.dim { opacity: .15; }
+.diagram .node.hit rect { stroke: var(--signal); stroke-width: 3px; }
+.find { flex: 1; min-width: 120px; }
+
+/* Compare */
+.row { display: flex; gap: 6px; margin: 14px 0; }
+.row input { flex: 1; min-width: 0; }
+table.cmp { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.cmp th, table.cmp td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; overflow-wrap: anywhere; }
+table.cmp tbody th { font-weight: 400; color: var(--muted); }
+table.cmp td.win { color: var(--good); font-weight: 700; }
+
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--signal); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }

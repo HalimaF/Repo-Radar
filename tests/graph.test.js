@@ -21,6 +21,21 @@ test('fetchSources gunzips and untars one download', async () => {
   assert.deepEqual(out, { 'm.js': 'x' });
 });
 
+test('fetchSources refuses an archive that unpacks past the cap', async () => {
+  const gz = gzipSync(makeTar({ 'big.js': 'x'.repeat(50000) }));
+  await assert.rejects(fetchSources('a', 'b', 'main', () => true, async () => new Response(gz), 10000), /too big/);
+});
+
+test('folders and packages named like Object.prototype keys do not break the graph', () => {
+  const g = buildGraph({
+    '__proto__/a.js': `import './b.js'`, '__proto__/b.js': '',
+    'lib/m.dart': `import 'package:constructor/x.dart';`,
+  });
+  assert.deepEqual(g.edges, [['__proto__/a.js', '__proto__/b.js']]);
+  assert.match(toMermaid(g).mermaid, /__proto__/);
+  assert.equal(hubs(g)[0].path, '__proto__/b.js');
+});
+
 test('JS/TS imports resolve to files, packages are ignored', () => {
   const g = buildGraph({
     'src/app.tsx': `import React from 'react';\nimport { api } from './lib/api';\nimport Btn from "@/components/Button";\nconst u = require('../util.js');\nexport * from './types.js';`,
@@ -68,6 +83,43 @@ test('Dart package: and relative imports resolve via pubspec name', () => {
     'lib/theme.dart': '',
   });
   assert.deepEqual(g.edges.map(e => e.join(' > ')).sort(), ['lib/main.dart > lib/screens/home.dart', 'lib/main.dart > lib/theme.dart', 'lib/screens/home.dart > lib/theme.dart']);
+});
+
+test('Go, Java, Rust and C# imports resolve', () => {
+  const edges = files => buildGraph(files).edges.map(e => e.join(' > ')).sort();
+  assert.deepEqual(edges({
+    'go.mod': 'module github.com/acme/app\n\ngo 1.22\n',
+    'main.go': 'package main\n\nimport (\n\t"fmt"\n\tdb "github.com/acme/app/internal/db"\n)\n',
+    'internal/db/conn.go': 'package db\n\nimport "github.com/acme/app/internal/log"\nimport "github.com/other/lib"\n',
+    'internal/db/query.go': 'package db\n',
+    'internal/log/log.go': 'package log\n',
+  }), ['internal/db/conn.go > internal/log/*', 'main.go > internal/db/*']);
+
+  assert.deepEqual(edges({
+    'src/main/java/com/acme/App.java': 'package com.acme;\n\nimport java.util.List;\nimport com.acme.db.Repo;\nimport static com.acme.util.Text.trim;\n',
+    'src/main/java/com/acme/db/Repo.java': 'package com.acme.db;\n',
+    'src/main/java/com/acme/util/Text.java': 'package com.acme.util;\n',
+  }), ['src/main/java/com/acme/App.java > src/main/java/com/acme/db/Repo.java', 'src/main/java/com/acme/App.java > src/main/java/com/acme/util/Text.java']);
+
+  assert.deepEqual(edges({
+    'src/main.rs': 'mod config;\npub mod net;\nuse std::fs;\nuse crate::net::http::Client;\n',
+    'src/config.rs': '',
+    'src/net/mod.rs': 'mod http;\n',
+    'src/net/http.rs': 'use crate::config::Settings;\n',
+  }), ['src/main.rs > src/config.rs', 'src/main.rs > src/net/http.rs', 'src/main.rs > src/net/mod.rs', 'src/net/http.rs > src/config.rs', 'src/net/mod.rs > src/net/http.rs']);
+
+  assert.deepEqual(edges({
+    'App/Program.cs': 'using System;\nusing Acme.Core;\nusing static Acme.Core.Maths;\n\nnamespace Acme.App;\nclass P { void M() { using var s = Open(); } }\n',
+    'Core/Maths.cs': 'namespace Acme.Core\n{\n}\n',
+  }), ['App/Program.cs > Core/*']);
+});
+
+test('Mermaid output says which file or folder each box stands for', () => {
+  const m = toMermaid({ nodes: [], edges: [['a/x.py', 'b/y.py'], ['main.go', 'internal/db/*']] });
+  assert.deepEqual(Object.values(m.ids).sort(), ['a/x.py', 'b/y.py', 'internal/db/*', 'main.go']);
+  assert.equal(m.links.length, 2);
+  assert.equal(m.ids[m.links[0][0]], 'a/x.py');
+  assert.match(m.mermaid, /\["\*"\]/);
 });
 
 test('Mermaid: file level groups by folder; big graphs collapse to folders', () => {

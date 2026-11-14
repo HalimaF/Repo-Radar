@@ -1,11 +1,12 @@
 // Import graph parsed from source text. No LLM: every edge is an import statement in the code.
-// shortcut: JS/TS (+Vue/Svelte), Python and Dart only; add Go/Java/Rust parsers when users ask.
+// Covers JS/TS (+Vue/Svelte), Python, Dart, Go, Java, Rust and C#.
+// Go and C# import a whole package or namespace, not a file, so their arrows point at "folder/*".
 const JS_EXT = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte'];
-export const SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|dart)$/;
-const SKIP = /(^|\/)(node_modules|vendor|dist|build|\.next|out|coverage|site-packages|\.venv|venv|__pycache__|\.dart_tool)\//;
+export const SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|dart|go|java|rs|cs)$/;
+const SKIP = /(^|\/)(node_modules|vendor|dist|build|target|obj|\.next|out|coverage|site-packages|\.venv|venv|__pycache__|\.dart_tool)\//;
 const SKIP_FILE = /\.(min|bundle)\.js$|\.d\.ts$|\.g\.dart$|\.freezed\.dart$/;
 
-export const isSource = p => (SOURCE.test(p) && !SKIP.test(p) && !SKIP_FILE.test(p)) || /(^|\/)pubspec\.yaml$/.test(p);
+export const isSource = p => (SOURCE.test(p) && !SKIP.test(p) && !SKIP_FILE.test(p)) || /(^|\/)(pubspec\.yaml|go\.mod)$/.test(p);
 
 const dirname = p => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 function join(dir, rel) {
@@ -74,15 +75,66 @@ function resolveDart(from, text, has, packages) {
   return out;
 }
 
+const wholeFolder = dir => (dir ? `${dir}/*` : '*');
+
+// A Go import names a package: the folder under the module root from go.mod.
+function resolveGo(from, text, goMods, goDirs) {
+  const specs = [...text.matchAll(/^import\s+(?:[\w.]+\s+)?"([^"]+)"/gm)].map(m => m[1]);
+  for (const block of text.matchAll(/^import\s*\(([^)]*)\)/gm)) for (const m of block[1].matchAll(/"([^"]+)"/g)) specs.push(m[1]);
+  return specs.map(spec => {
+    const mod = goMods.find(([name]) => spec === name || spec.startsWith(`${name}/`));
+    const dir = mod && join(mod[1], spec.slice(mod[0].length));
+    return mod && goDirs.has(dir) && dir !== dirname(from) ? wholeFolder(dir) : null;
+  });
+}
+
+// Java imports a class by its full name; "import static a.B.method" names a member of a.B.
+const resolveJava = (text, classes) =>
+  [...text.matchAll(/^\s*import\s+(?:static\s+)?([\w.]+)\s*;/gm)].map(m => classes.get(m[1]) ?? classes.get(m[1].replace(/\.\w+$/, '')));
+
+function resolveRust(from, text, has) {
+  const out = [], dir = dirname(from), stem = from.split('/').pop().replace(/\.rs$/, '');
+  const pick = base => [`${base}.rs`, `${base}/mod.rs`].find(has);
+  // "mod x;" in a.rs means a/x.rs, but in mod.rs, lib.rs or main.rs it means x.rs beside it.
+  const modDir = ['mod', 'lib', 'main'].includes(stem) ? dir : join(dir, stem);
+  for (const m of text.matchAll(/^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;/gm)) out.push(pick(join(modDir, m[1])));
+  // "use crate::a::b::Name": the longest prefix that is a file wins.
+  const root = /^(?:.*\/)?src\//.exec(from)?.[0];
+  if (root) for (const m of text.matchAll(/\buse\s+crate::([\w:]+)/g)) {
+    const segs = m[1].split('::').filter(Boolean);
+    for (let n = segs.length; n > 0; n--) { const hit = pick(root + segs.slice(0, n).join('/')); if (hit) { out.push(hit); break; } }
+  }
+  return out;
+}
+
+// C# "using A.B" names a namespace: every folder with a file that declares it.
+function resolveCs(from, text, namespaces) {
+  const out = [];
+  for (const m of text.matchAll(/^\s*(?:global\s+)?using\s+(?:static\s+)?(?:\w+\s*=\s*)?([\w.]+)\s*;/gm))
+    for (const dir of namespaces.get(m[1]) ?? namespaces.get(m[1].replace(/\.\w+$/, '')) ?? []) if (dir !== dirname(from)) out.push(wholeFolder(dir));
+  return out;
+}
+
 /** files: { path: text } -> { nodes: [path], edges: [[from, to]] } (deduplicated, no self-loops). */
 export function buildGraph(files) {
   const paths = Object.keys(files).filter(p => SOURCE.test(p));
   const set = new Set(paths);
   const has = p => set.has(p);
-  const packages = {}; // Dart: pubspec "name:" -> folder holding its lib/
+  const packages = Object.create(null); // Dart: pubspec "name:" -> folder holding its lib/
+  const goMods = [], goDirs = new Set(); // Go: [module name, its folder], and folders that hold .go files
+  const classes = new Map();             // Java: "com.acme.Thing" -> path
+  const namespaces = new Map();          // C#: "Acme.Core" -> folders declaring it
   for (const [p, text] of Object.entries(files)) {
     const m = /(^|\/)pubspec\.yaml$/.test(p) && /^name:\s*([\w]+)/m.exec(text);
     if (m) packages[m[1]] = dirname(p);
+    else if (/(^|\/)go\.mod$/.test(p)) { const mod = /^module\s+(\S+)/m.exec(text); if (mod) goMods.push([mod[1], dirname(p)]); }
+    else if (p.endsWith('.go')) goDirs.add(dirname(p));
+    else if (p.endsWith('.java')) {
+      const pkg = /^\s*package\s+([\w.]+)\s*;/m.exec(text);
+      classes.set((pkg ? `${pkg[1]}.` : '') + p.split('/').pop().replace(/\.java$/, ''), p);
+    } else if (p.endsWith('.cs')) {
+      for (const ns of text.matchAll(/^\s*namespace\s+([\w.]+)/gm)) namespaces.set(ns[1], (namespaces.get(ns[1]) ?? new Set()).add(dirname(p)));
+    }
   }
   const edges = new Set();
   for (const from of paths) {
@@ -90,6 +142,10 @@ export function buildGraph(files) {
     let targets;
     if (from.endsWith('.py')) targets = resolvePy(from, text, has);
     else if (from.endsWith('.dart')) targets = resolveDart(from, text, has, packages);
+    else if (from.endsWith('.go')) targets = resolveGo(from, text, goMods, goDirs);
+    else if (from.endsWith('.java')) targets = resolveJava(text, classes);
+    else if (from.endsWith('.rs')) targets = resolveRust(from, text, has);
+    else if (from.endsWith('.cs')) targets = resolveCs(from, text, namespaces);
     else targets = jsSpecs(text).map(s => resolveJs(from, s, has));
     for (const to of targets) if (to && to !== from) edges.add(`${from}\n${to}`);
   }
@@ -98,7 +154,7 @@ export function buildGraph(files) {
 
 /** Files ranked by how many other files import them. */
 export function hubs(graph, n = 5) {
-  const inDeg = {};
+  const inDeg = Object.create(null);
   for (const [, to] of graph.edges) inDeg[to] = (inDeg[to] ?? 0) + 1;
   return Object.entries(inDeg).sort((a, b) => b[1] - a[1]).slice(0, n).map(([path, count]) => ({ path, count }));
 }
@@ -116,7 +172,7 @@ export function toMermaid(graph, maxNodes = 60) {
 
   if (linked.size <= maxNodes) {
     const id = new Map([...linked].map((p, i) => [p, `n${i}`]));
-    const byDir = {};
+    const byDir = Object.create(null);
     for (const p of linked) (byDir[dirname(p)] ??= []).push(p);
     const lines = ['flowchart LR'];
     Object.entries(byDir).forEach(([dir, ps], i) => {
@@ -124,8 +180,9 @@ export function toMermaid(graph, maxNodes = 60) {
       for (const p of ps) lines.push(`    ${id.get(p)}["${esc(p.split('/').pop())}"]`);
       if (dir) lines.push('  end');
     });
-    for (const [a, b] of graph.edges) lines.push(`  ${id.get(a)} --> ${id.get(b)}`);
-    return { mermaid: lines.join('\n'), level: 'file', shown: linked.size };
+    const links = graph.edges.map(([a, b]) => [id.get(a), id.get(b)]);
+    for (const [a, b] of links) lines.push(`  ${a} --> ${b}`);
+    return { mermaid: lines.join('\n'), level: 'file', shown: linked.size, ...names(id), links };
   }
 
   for (const depth of [3, 2, 1]) {
@@ -133,16 +190,21 @@ export function toMermaid(graph, maxNodes = 60) {
     const folders = new Set([...linked].map(folder));
     if (folders.size > maxNodes && depth > 1) continue;
     const id = new Map([...folders].map((f, i) => [f, `f${i}`]));
-    const weight = {};
+    const weight = Object.create(null);
     for (const [a, b] of graph.edges) {
       const fa = folder(a), fb = folder(b);
       if (fa !== fb) weight[`${fa}\n${fb}`] = (weight[`${fa}\n${fb}`] ?? 0) + 1;
     }
     const lines = ['flowchart LR', ...[...folders].map(f => `  ${id.get(f)}["${esc(f)}/"]`)];
+    const links = [];
     for (const [k, w] of Object.entries(weight)) {
-      const [a, b] = k.split('\n');
-      lines.push(`  ${id.get(a)} -->|${w}| ${id.get(b)}`);
+      const [a, b] = k.split('\n').map(f => id.get(f));
+      links.push([a, b]);
+      lines.push(`  ${a} -->|${w}| ${b}`);
     }
-    return { mermaid: lines.join('\n'), level: 'folder', shown: folders.size };
+    return { mermaid: lines.join('\n'), level: 'folder', shown: folders.size, ...names(id), links };
   }
 }
+
+// ids: diagram node id -> the file or folder it stands for, so the panel can make nodes clickable and searchable.
+const names = id => ({ ids: Object.fromEntries([...id].map(([name, i]) => [i, name])) });
