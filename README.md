@@ -38,6 +38,8 @@ Every number and the verdict sentence are computed from data. No LLM decides the
 ## Install (developer mode)
 
 ```bash
+git clone https://github.com/HalimaF/Repo-Radar.git
+cd Repo-Radar
 npm install          # dev tools only; the extension has no runtime npm dependencies
 npm run vendor       # copies Mermaid into vendor/ (already done in this repo)
 ```
