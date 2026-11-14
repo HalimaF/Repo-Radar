@@ -7,6 +7,12 @@ import { checkWatchlist } from '../src/lib/watch.js';
 import { deviceLogin } from '../src/lib/oauth.js';
 import { normalizeDiagram, normalizeHealth } from '../src/lib/repoPilot.js';
 
+test('commit stats that GitHub has not computed yet are skipped, not scored as zero', () => {
+  const raw = { meta: { pushed_at: new Date().toISOString(), open_issues_count: 0 }, openPRs: 0, staleIssues: 0 };
+  assert.equal(activityScore(activity({ ...raw, commitActivity: null })), 100);
+  assert.equal(activityScore(activity({ ...raw, commitActivity: [{ total: 0 }] })), 50);
+});
+
 const NOW = Date.parse('2026-10-11T00:00:00Z');
 const weekAgo = n => Math.floor((NOW - n * 7 * 86400000) / 1000);
 
@@ -33,8 +39,8 @@ test('busFactor counts fewest authors covering half of last-year commits', () =>
 
 test('activityScore: archived is 0, busy repo scores high, dormant low', () => {
   assert.equal(activityScore({ archived: true }), 0);
-  const busy = { daysSincePush: 1, commits90: 80, bus: { value: 5 }, openIssues: 10, staleIssues: 0 };
-  const dead = { daysSincePush: 900, commits90: 0, bus: { value: 0 }, openIssues: 10, staleIssues: 10 };
+  const busy = { weekly: [80], daysSincePush: 1, commits90: 80, bus: { value: 5 }, openIssues: 10, staleIssues: 0 };
+  const dead = { weekly: [0], daysSincePush: 900, commits90: 0, bus: { value: 0 }, openIssues: 10, staleIssues: 10 };
   assert.equal(activityScore(busy), 100);
   assert.equal(activityScore(dead), 0);
 });

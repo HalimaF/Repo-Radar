@@ -93,7 +93,7 @@ function render() {
         raw.meta.description && h('div', { class: 'sub' }, raw.meta.description))),
     h('p', { class: 'verdict' }, view.verdict),
     strip(act.weekly),
-    h('div', { class: 'strip-caption' }, h('span', {}, 'A year ago'), h('span', {}, `${fmt(year)} commits in 52 weeks`), h('span', {}, 'This week')));
+    h('div', { class: 'strip-caption' }, h('span', {}, 'A year ago'), h('span', {}, act.weekly.length ? `${fmt(year)} commits in 52 weeks` : 'GitHub is still counting commits. Refresh in a minute.'), h('span', {}, 'This week')));
 
   const tabs = [['overview', 'Overview'], ['activity', 'Activity'], ['health', 'Health'], ['deps', 'Dependencies'], ['arch', 'Architecture'], ['compare', 'Compare']];
   const nav = h('nav', { role: 'tablist' }, tabs.map(([id, label]) =>

@@ -52,8 +52,9 @@ export function activityParts(a) {
   const d = a.daysSincePush;
   const parts = [
     { score: d <= 7 ? 100 : d <= 30 ? 80 : d <= 90 ? 55 : d <= 180 ? 30 : d <= 365 ? 10 : 0, why: isFinite(d) ? `Last push was ${d} days ago` : 'Nothing has been pushed' },
-    { score: Math.min(100, 25 * Math.log2(1 + a.commits90)), why: `Only ${a.commits90} commits in the last 90 days` }, // 15 commits/quarter = 100
   ];
+  // GitHub computes commit stats lazily; no weeks means "not ready", not "no commits".
+  if (a.weekly.length) parts.push({ score: Math.min(100, 25 * Math.log2(1 + a.commits90)), why: `Only ${a.commits90} commits in the last 90 days` }); // 15 commits/quarter = 100
   if (a.bus) parts.push({ score: { 0: 0, 1: 30, 2: 60, 3: 80, 4: 80 }[a.bus.value] ?? 100, why: a.bus.value ? `Bus factor is ${a.bus.value}: few people make most of the commits` : 'No commits in the last year' });
   if (a.openIssues && a.staleIssues != null) parts.push({ score: 100 * (1 - Math.min(1, a.staleIssues / a.openIssues)), why: `${a.staleIssues} of ${a.openIssues} open issues idle for 90+ days` });
   return parts;
