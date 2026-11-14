@@ -98,8 +98,8 @@ export function dependencyScore(deps) {
 }
 
 /** Weighted average of whichever parts are available; null parts are skipped, not zeroed. */
-export function overall({ activity: a, hygiene: h, deps, code }) {
-  const parts = [[a, 0.35], [h, 0.25], [deps, 0.2], [code, 0.2]].filter(([v]) => v != null);
+export function overall({ activity: a, hygiene: h, deps }) {
+  const parts = [[a, 0.35], [h, 0.25], [deps, 0.2]].filter(([v]) => v != null);
   const w = parts.reduce((s, [, x]) => s + x, 0);
   return clamp(parts.reduce((s, [v, x]) => s + v * x, 0) / w);
 }

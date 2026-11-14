@@ -18,7 +18,6 @@ When you scan a repository, the extension requests data about that repository fr
 | `api.deps.dev` | Names and versions of up to 30 of those dependencies, to look up their licence and latest version |
 | `github.com`, only if you use "Sign in with GitHub" | The sign-in request that GitHub answers with a token |
 | `img.shields.io`, only if you paste a copied badge somewhere | Nothing from the extension. Whoever views the badge loads a picture that contains the grade letter |
-| Your Repo Pilot backend, only if you set one in Settings | The link of the repo you scan |
 
 Repos on your watchlist are scanned again once a day in the background, with the same requests as above.
 

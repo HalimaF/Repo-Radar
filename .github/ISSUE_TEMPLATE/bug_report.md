@@ -19,6 +19,5 @@ labels: bug
 - Chrome version:
 - Repo Radar version (from `chrome://extensions`):
 - GitHub token set: yes / no
-- Repo Pilot backend connected: yes / no
 
 **Error text or screenshot**

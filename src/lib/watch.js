@@ -2,7 +2,7 @@
 import { scanRepo } from './collect.js';
 import { summarize, overall, grade } from './score.js';
 
-/** What is remembered about a watched repo. Repo Pilot's score is left out so the daily check compares like with like. */
+/** What is remembered about a watched repo. */
 export const snapshot = view => ({ grade: grade(overall(view.scores)), vulns: view.deps.vulns.length });
 
 /** Re-scans watched repos. Returns { "owner/repo": { now, news } }, where news lists what got worse since `watch`. */

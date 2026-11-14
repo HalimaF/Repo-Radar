@@ -2,7 +2,6 @@ import { parseRepo } from '../lib/repoUrl.js';
 import { scanRepo } from '../lib/collect.js';
 import { outdated, copyleft } from '../lib/deps.js';
 import { summarize, explain, overall, grade } from '../lib/score.js';
-import { makeRepoPilot } from '../lib/repoPilot.js';
 import { loadSettings } from '../lib/settings.js';
 import { fetchSources } from '../lib/tarball.js';
 import { buildGraph, toMermaid, hubs, isSource } from '../lib/graph.js';
@@ -18,7 +17,6 @@ let versus = null;    // Compare tab: { target, view?, error? }
 let watch = {};       // "owner/repo" -> { grade, vulns } as last seen; kept in chrome.storage.local
 let tab = 'overview';
 let runId = 0;        // guards against a slow earlier scan overwriting a newer one
-const pilot = new Map(); // "owner/repo" -> { status, diagram, health, error }
 const arch = new Map();  // "owner/repo" -> built-in diagram { status, graph, mermaid, level, ids, links, hubs, error }
 const MAX_REPO_KB = 150000;
 
@@ -71,8 +69,7 @@ async function analyze(target, { force = false } = {}) {
 }
 
 function totals(v = view) {
-  const code = pilot.get(key(v.raw))?.health?.score ?? null;
-  const s = { ...v.scores, code };
+  const s = v.scores;
   const total = overall(s);
   return { s, total, g: grade(total) };
 }
@@ -138,8 +135,7 @@ function overview() {
     h('div', { class: 'bars' },
       bar('Activity', s.activity),
       bar('Project hygiene', s.hygiene),
-      bar('Dependencies', s.deps, 'none'),
-      bar('Code structure', s.code, 'off')),
+      bar('Dependencies', s.deps, 'none')),
     h('dl', { class: 'facts' },
       fact('Stars', fmt(raw.meta.stargazers_count)),
       fact('Forks', fmt(raw.meta.forks_count)),
@@ -147,7 +143,6 @@ function overview() {
       fact('Last push', ago(act.daysSincePush)),
       fact('Latest release', act.lastRelease ? `${act.lastRelease.tag}, ${ago(act.lastRelease.days)}` : 'none'),
       fact('License', licence(view))),
-    s.code == null && h('p', { class: 'note' }, 'Code structure joins the score once you run Repo Pilot from the Architecture tab.'),
     lost.length ? [
       h('h2', {}, 'Where points were lost'),
       h('ul', { class: 'plain' }, lost.map(x => h('li', {},
@@ -191,7 +186,7 @@ function report() {
     `## Repo Radar: [${raw.meta.full_name}](${raw.meta.html_url})`, '',
     `**Grade ${g}, ${total}/100.** ${view.verdict}`, '',
     '| Measure | Value |', '|---|---|',
-    row('Activity', s.activity), row('Project hygiene', s.hygiene), row('Dependencies', s.deps), row('Code structure', s.code),
+    row('Activity', s.activity), row('Project hygiene', s.hygiene), row('Dependencies', s.deps),
     row('Last push', ago(act.daysSincePush)), row('Bus factor', act.bus?.value),
     row('Known vulnerabilities', deps.packages.length ? deps.vulns.length : null), row('License', licence(view)),
     ...(missing.length ? ['', `Missing or failing: ${missing.join(', ')}.`] : []),
@@ -240,27 +235,12 @@ function activityTab() {
 
 function healthTab() {
   const { hyg } = view;
-  const p = pilot.get(key(current));
   const mark = ok => h('span', { class: `mark ${ok === null ? 'na' : ok ? 'ok' : 'no'}`, 'aria-label': ok === null ? 'unknown' : ok ? 'present' : 'missing' }, ok === null ? '?' : ok ? '✓' : '✗');
   return [
     h('h2', {}, `Project hygiene: ${hyg.score}/100`),
     h('ul', { class: 'plain' }, hyg.checks.map(c => h('li', {}, mark(c.ok),
       h('div', { class: 'grow' }, c.label, c.note && h('div', { class: 'sub' }, c.note))))),
     view.raw.treeTruncated && h('p', { class: 'note' }, 'This repo is very large, so GitHub returned a partial file list. Some checks may read as missing.'),
-    h('h2', {}, 'Code structure'),
-    p?.health ? codeHealth(p.health) : pilotPrompt('Grade circular imports, hub modules, untested modules and dead code with Repo Pilot.'),
-  ];
-}
-
-function codeHealth(r) {
-  const order = ['critical', 'high', 'medium', 'moderate', 'low', 'info'];
-  const findings = [...r.findings].sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
-  return [
-    h('p', {}, r.score != null ? `${r.score}/100${r.grade ? ` (grade ${r.grade})` : ''}. ` : '', r.summary),
-    r.nextStep && h('p', { class: 'sub' }, r.nextStep),
-    findings.length ? h('ul', { class: 'plain' }, findings.slice(0, 40).map(f => h('li', {},
-      h('span', { class: `sev ${f.severity}` }, f.severity),
-      h('div', { class: 'grow' }, f.title, f.file && h('div', { class: 'sub' }, fileLink(f.file)))))) : h('p', { class: 'sub' }, 'No findings.'),
   ];
 }
 
@@ -359,7 +339,7 @@ async function buildArch() {
   const target = current, k = key(target), { meta } = view.raw;
   arch.set(k, { status: 'running' });
   try {
-    if (meta.size > MAX_REPO_KB) throw new Error(`This repo is over ${MAX_REPO_KB / 1000} MB, too big to parse in the browser. Repo Pilot can still draw it.`);
+    if (meta.size > MAX_REPO_KB) throw new Error(`This repo is over ${MAX_REPO_KB / 1000} MB, too big to parse in the browser.`);
     const files = await fetchSources(target.owner, target.repo, meta.default_branch, isSource);
     const graph = buildGraph(files);
     arch.set(k, { status: 'done', graph, ...toMermaid(graph), hubs: hubs(graph) });
@@ -371,19 +351,17 @@ async function buildArch() {
 
 function archTab() {
   const k = key(current);
-  const p = pilot.get(k);
-  if (p?.diagram?.mermaid) return [diagramView(p.diagram.mermaid), h('p', { class: 'note' }, p.diagram.aggregated ? 'Drawn by Repo Pilot at folder level.' : 'Drawn by Repo Pilot.')];
 
   const a = arch.get(k);
   if (!a) buildArch();
   if (!a || a.status === 'running') return h('p', { class: 'empty' }, h('span', { class: 'spin' }), ' Downloading the source and parsing imports…');
-  if (a.status === 'error') return [h('p', { class: 'error' }, a.error), h('div', { class: 'actions' }, h('button', { onclick: () => { arch.delete(k); render(); } }, 'Try again')), pilotOptional()];
+  if (a.status === 'error') return [h('p', { class: 'error' }, a.error), h('div', { class: 'actions' }, h('button', { onclick: () => { arch.delete(k); render(); } }, 'Try again'))];
 
   const files = a.graph.nodes.length;
   if (!a.mermaid) {
     return [h('p', { class: 'empty' }, files
       ? `Parsed ${files} source files but found no imports between them.`
-      : 'No JavaScript, TypeScript, Python, Dart, Go, Java, Rust or C# source found.'), pilotOptional()];
+      : 'No JavaScript, TypeScript, Python, Dart, Go, Java, Rust or C# source found.')];
   }
   return [
     h('p', { class: 'sub' }, `${a.graph.edges.length} imports between ${a.shown} ${a.level === 'folder' ? 'folders' : 'files'}, parsed from ${files} source files.`
@@ -392,11 +370,10 @@ function archTab() {
     a.hubs.length && h('h2', {}, 'Most imported files'),
     a.hubs.length && h('ul', { class: 'plain' }, a.hubs.map(x => h('li', {}, h('div', { class: 'grow' }, fileLink(x.path)), h('span', { class: 'sub' }, `${x.count} importers`)))),
     h('p', { class: 'note' }, 'Every arrow is an import statement found in the code. Click a box to open it on GitHub. A box named * is a whole Go package or C# namespace. Imports resolved through custom path aliases or build config may be missing.'),
-    pilotOptional(),
   ];
 }
 
-// `a` (the built-in diagram's ids and links) makes the boxes clickable and searchable; Repo Pilot diagrams come without it.
+// `a` (the built-in diagram's ids and links) makes the boxes clickable and searchable.
 function diagramView(code, a) {
   let scale = 1;
   const box = h('div', { class: 'diagram' }, h('span', { class: 'spin' }));
@@ -446,13 +423,6 @@ function saveSvg(box) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Shown only when a Repo Pilot backend is configured; otherwise nothing.
-function pilotOptional() {
-  const wrap = h('div', {});
-  loadSettings().then(({ repoPilotUrl }) => { if (repoPilotUrl) wrap.replaceChildren(pilotPrompt('Repo Pilot can also draw this, with nested folders and support for more languages.')); });
-  return wrap;
-}
-
 let mermaidReady = false;
 async function renderMermaid(box, code) {
   try {
@@ -466,49 +436,6 @@ async function renderMermaid(box, code) {
   } catch (e) {
     box.replaceChildren(h('p', { class: 'error' }, `Could not draw the diagram: ${e.message ?? e}`));
   }
-}
-
-// ---------- Repo Pilot ----------
-
-function pilotPrompt(why) {
-  const p = pilot.get(key(current));
-  const wrap = h('div', {});
-  loadSettings().then(({ repoPilotUrl }) => {
-    if (!repoPilotUrl) {
-      wrap.replaceChildren(h('p', { class: 'sub' }, why),
-        h('p', {}, 'Add your Repo Pilot backend URL in ', h('a', { href: '#', onclick: e => { e.preventDefault(); chrome.runtime.openOptionsPage(); } }, 'Settings'), ' to turn this on.'));
-      return;
-    }
-    wrap.replaceChildren(
-      h('p', { class: 'sub' }, why),
-      p?.status === 'running'
-        ? h('p', {}, h('span', { class: 'spin' }), ' Repo Pilot is indexing this repo. Big repos take a minute or two.')
-        : h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: runPilot }, 'Run Repo Pilot')),
-      p?.error && h('p', { class: 'error' }, p.error));
-  });
-  return wrap;
-}
-
-async function runPilot() {
-  const target = current, k = key(target);
-  const repoUrl = `https://github.com/${target.owner}/${target.repo}`;
-  pilot.set(k, { status: 'running' });
-  render();
-  const { repoPilotUrl, repoPilotEndpoints } = await loadSettings();
-  const rp = makeRepoPilot(repoPilotUrl, repoPilotEndpoints);
-  const entry = { status: 'done' };
-  try {
-    await rp.ingest(repoUrl);
-    const [diagram, health] = await Promise.allSettled([rp.diagram(repoUrl), rp.codeHealth(repoUrl)]);
-    if (diagram.status === 'fulfilled') entry.diagram = diagram.value;
-    if (health.status === 'fulfilled') entry.health = health.value;
-    const errs = [diagram, health].filter(r => r.status === 'rejected').map(r => r.reason.message);
-    if (errs.length) entry.error = errs.join(' ');
-  } catch (e) {
-    entry.error = e.message.includes('Failed to fetch') ? `Could not reach Repo Pilot at ${repoPilotUrl}. Is it running?` : e.message;
-  }
-  pilot.set(k, entry);
-  if (current && key(current) === k) render();
 }
 
 // ---------- wiring ----------

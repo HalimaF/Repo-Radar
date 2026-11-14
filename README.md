@@ -10,16 +10,16 @@ Open any repo on github.com, click the Repo Radar icon, and the panel scans it. 
 |---|---|---|
 | **Overview** | A letter grade, a 0–100 score, a one-line verdict, a year of weekly commits, and a list of where points were lost | Computed from the tabs below |
 | **Activity** | Commits and merged PRs in the last 90 days, open PRs and issues, issues idle 90+ days, typical time to merge a PR and close an issue, top contributors, bus factor | GitHub API |
-| **Health** | Hygiene checklist (README, license, tests, CI configured and passing, contributing guide, security policy, templates) plus Repo Pilot's code-structure report card | GitHub API, Repo Pilot |
+| **Health** | Hygiene checklist (README, license, tests, CI configured and passing, contributing guide, security policy, templates) | GitHub API |
 | **Dependencies** | Known vulnerabilities by severity, packages far behind their latest version, and packages under a GPL-family licence | Dependency files checked against [OSV.dev](https://osv.dev) and [deps.dev](https://deps.dev) |
-| **Architecture** | The repo's real import graph as a zoomable, searchable diagram with clickable boxes, plus its most-imported files | Parsed in the browser from one download of the source. Repo Pilot optional |
+| **Architecture** | The repo's real import graph as a zoomable, searchable diagram with clickable boxes, plus its most-imported files | Parsed in the browser from one download of the source. |
 | **Compare** | A second repo scanned and set beside the first, with the better value in each row highlighted | The same scan, run twice |
 
-Every number and the verdict sentence are computed from data. No LLM decides the score, in the same spirit as Repo Pilot: structure is parsed, never generated.
+Every number and the verdict sentence are computed from data. No LLM decides the score: structure is parsed, never generated.
 
 **Bus factor** is the fewest people who together made half of the last year's commits. A bus factor of 1 means the project leans on one person.
 
-**The overall score** weighs activity 35%, hygiene 25%, dependencies 20%, code structure 20%. Parts that aren't available (no manifests, Repo Pilot not connected) are left out and the rest re-weighted, never counted as zero. Outdated packages and licences are shown but do not change the score.
+**The overall score** weighs activity 44%, hygiene 31% and dependencies 25%. A part that isn't available (no dependency files found) is left out and the rest re-weighted, never counted as zero. Outdated packages and licences are shown but do not change the score.
 
 ### Supported languages
 
@@ -64,8 +64,6 @@ Right-click the icon → **Options**, or use the ⚙ button in the panel.
 
 - **GitHub token (optional).** One scan costs about 12 GitHub requests, so without a token you get roughly 5 scans an hour. A fine-grained token with public-repo read-only access raises that to about 400. It's kept in `chrome.storage.local` on your computer only.
 - **Sign in with GitHub (off by default).** A one-click alternative to pasting a token. It appears once `CLIENT_ID` in `src/lib/oauth.js` is set to the client ID of a GitHub OAuth app that has **Enable Device Flow** ticked. No client secret is involved and no scope is requested, so the token can only read public data.
-- **Repo Pilot backend URL (optional).** Adds the code-structure score and an alternative Repo Pilot diagram. The Architecture tab works without it. The browser asks permission for that one host when you save.
-- **Endpoint paths (advanced).** Repo Radar calls Repo Pilot's HTTP API and never modifies it. Defaults are `/api/ingest`, `/api/diagram`, `/api/code-health`, `/api/onboarding` and `/api/ask`, each a `POST` with `{"repo_url": "..."}`. Edit them here if your Repo Pilot routes differ.
 
 Scans are cached for 30 minutes per repo. **Refresh** on the Overview tab forces a new one.
 
@@ -84,7 +82,6 @@ src/lib/               pure logic, no chrome.* calls (easy to test)
   graph.js             import parsing per language, Mermaid output, hub files
   watch.js             watchlist: what to remember and what counts as "got worse"
   oauth.js             GitHub device-flow sign-in
-  repoPilot.js         read-only Repo Pilot client, tolerant of response shapes
   settings.js          chrome.storage wrapper
 src/panel/             the side panel UI
 src/options/           the settings page
@@ -99,7 +96,7 @@ tests/                 unit tests + the real panel run in jsdom with fake chrome
 npm test
 ```
 
-`tests/panel.test.js` loads the real `panel.html` and `panel.js` into jsdom with `chrome.*` and `fetch` faked, then clicks through every tab, including a Repo Pilot run.
+`tests/panel.test.js` loads the real `panel.html` and `panel.js` into jsdom with `chrome.*` and `fetch` faked, then clicks through every tab.
 
 ## Limits
 

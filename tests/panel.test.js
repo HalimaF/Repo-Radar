@@ -52,10 +52,6 @@ function fakeFetch(url, opts = {}) {
     if (u.pathname === '/v3/systems/pypi/packages/requests/versions/2.31.0') return json({ licenses: ['GPL-3.0'] });
     return json({}, 404);
   }
-  // Repo Pilot backend
-  if (u.pathname === '/api/ingest') return json({ ok: true });
-  if (u.pathname === '/api/diagram') return json({ mermaid: 'flowchart LR\n a-->b' });
-  if (u.pathname === '/api/code-health') return json({ score: 64, grade: 'C', summary: 'Some structural debt.', findings: [{ title: 'Circular import', severity: 'high', file: 'app/main.py' }] });
   return json({}, 404);
 }
 
@@ -193,22 +189,6 @@ test('diagram boxes open their file and the search fades unrelated boxes', async
   assert.equal(doc.querySelectorAll('g.node.dim').length, 3);
 });
 
-test('Repo Pilot fills Architecture and adds code structure to the score', async () => {
-  const { doc, store } = await boot();
-  store.repoPilotUrl = 'http://localhost:8000';
-  await until(() => doc.querySelector('.grade'));
-  const before = doc.querySelector('.score-line').textContent;
-
-  tabBtn(doc, 'Architecture').click();
-  (await until(() => [...doc.querySelectorAll('button')].find(b => b.textContent === 'Run Repo Pilot'))).click();
-  await until(() => doc.getElementById('drawn'));
-
-  tabBtn(doc, 'Health').click();
-  assert.match(doc.getElementById('main').textContent, /64\/100 \(grade C\)/);
-  assert.match(doc.getElementById('main').textContent, /Circular import/);
-  assert.notEqual(doc.querySelector('.score-line').textContent, before, 'overall score now includes code structure');
-});
-
 test('Architecture tab draws the import graph without any backend', async () => {
   const { doc } = await boot();
   await until(() => doc.querySelector('.grade'));
@@ -217,5 +197,4 @@ test('Architecture tab draws the import graph without any backend', async () => 
   const text = doc.getElementById('main').textContent;
   assert.match(text, /3 imports between 3 files, parsed from 3 source files/);
   assert.match(text, /Most imported filesapp\/db\.py2 importers/);
-  assert.ok(!/Run Repo Pilot/.test(text), 'no Repo Pilot prompt when no backend is set');
 });

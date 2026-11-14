@@ -5,7 +5,6 @@ import { busFactor, activity, activityScore, hygiene, dependencyScore, overall, 
 import { pickManifests, parseManifest, outdated, copyleft } from '../src/lib/deps.js';
 import { checkWatchlist } from '../src/lib/watch.js';
 import { deviceLogin } from '../src/lib/oauth.js';
-import { normalizeDiagram, normalizeHealth } from '../src/lib/repoPilot.js';
 
 test('commit stats that GitHub has not computed yet are skipped, not scored as zero', () => {
   const raw = { meta: { pushed_at: new Date().toISOString(), open_issues_count: 0 }, openPRs: 0, staleIssues: 0 };
@@ -62,7 +61,7 @@ test('dependency score, overall weighting and grades', () => {
   assert.equal(dependencyScore({ packages: [], vulns: [] }), null);
   assert.equal(dependencyScore({ packages: [1], vulns: [{ severity: 'CRITICAL' }, { severity: 'LOW' }] }), 72);
   // Missing parts are skipped, not counted as zero.
-  assert.equal(overall({ activity: 80, hygiene: 80, deps: null, code: null }), 80);
+  assert.equal(overall({ activity: 80, hygiene: 80, deps: null }), 80);
   assert.equal(grade(90), 'A');
   assert.equal(grade(39), 'F');
 });
@@ -150,10 +149,3 @@ test('device sign-in polls until GitHub hands over a token', async () => {
   await assert.rejects(deviceLogin('cid', () => {}, async () => ({ json: async () => ({ error_description: 'bad app' }) })), /bad app/);
 });
 
-test('Repo Pilot responses are read tolerantly', () => {
-  assert.equal(normalizeDiagram({ mermaid: 'flowchart LR' }).mermaid, 'flowchart LR');
-  assert.equal(normalizeDiagram({ diagram: 'graph TD' }).mermaid, 'graph TD');
-  const h = normalizeHealth({ score: 81.6, grade: 'B', findings: [{ message: 'Cycle', level: 'HIGH', path: 'a.py' }] });
-  assert.deepEqual(h.findings[0], { title: 'Cycle', severity: 'high', file: 'a.py' });
-  assert.equal(h.score, 82);
-});
